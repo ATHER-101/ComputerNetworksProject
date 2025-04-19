@@ -15,15 +15,15 @@ BUFFER_FOLDER = "buffer"
 BUFFER_WINDOW = 2
 CHUNK_SIZE = 4096
 WINDOW_WIDTH = 700
-WINDOW_HEIGHT = 550  # Increased to 550 for more vertical space
+WINDOW_HEIGHT = 550
 VIDEO_LABEL_WIDTH = 700
 VIDEO_LABEL_HEIGHT = 400
-SEGMENT_DURATION = 4  # Duration of each segment in seconds, matches -hls_time 4 from encoding
-SEEK_DEBOUNCE_TIME = 0.1  # Minimum time (seconds) between seek requests
-DOWNLOAD_TIMEOUT_1 = 1  # First threshold (seconds) for downgrading to next quality
-DOWNLOAD_TIMEOUT_2 = 3  # Second threshold (seconds) for downgrading directly to 240p
-ABR_RESET_DELAY = 30  # Time (seconds) after explicit quality change to re-enable ABR
-QUALITY_LEVELS = ["720p", "360p", "240p"]  # Ordered list for ABR downgrades
+SEGMENT_DURATION = 4
+SEEK_DEBOUNCE_TIME = 0.1
+DOWNLOAD_TIMEOUT_1 = 1
+DOWNLOAD_TIMEOUT_2 = 3
+ABR_RESET_DELAY = 30
+QUALITY_LEVELS = ["720p", "360p", "240p"]
 
 # Global State
 downloaded_segments = set()
@@ -32,29 +32,29 @@ next_segment_to_play = 0
 stop_flag = False
 playback_state = {
     "playing": True,
-    "seek_to": None,  # Represents timestamp in seconds
+    "seek_to": None,
     "exit": False,
-    "abr_enabled": True,  # Controls whether ABR can downgrade quality
-    "last_explicit_quality_change": 0  # Timestamp of last user quality change
+    "abr_enabled": True,
+    "last_explicit_quality_change": 0
 }
 manifest_dict = None
 current_video_name = None
-current_quality = "720p"  # Start at 720p
+current_quality = "720p"
 pending_quality = None
 CDN_IP = None
 CDN_PORT = None
 MAX_SEGMENT_INDEX = -1
 TOTAL_DURATION = 0
-last_seek_time = 0  # For debouncing slider seeks
-last_download_time = 0  # Timestamp of last successful download
-last_playback_time = 0  # Timestamp of last successful frame playback
-last_not_found_log = 0  # For throttling "segment not found" logs
+last_seek_time = 0
+last_download_time = 0
+last_playback_time = 0
+last_not_found_log = 0
 
 # Helper Functions
 def get_manifest():
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect(('127.0.0.1', 8080))
+            s.connect(('127.0.0.1', 8090))
             s.sendall(b"GIVE MANIFEST")
             return s.recv(4096).decode()
     except Exception as e:
@@ -81,9 +81,12 @@ def get_segment_count(ip, port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((ip, port))
             s.sendall(f"GET_SEGMENT_COUNT {current_video_name} {current_quality}".encode())
-            return int(s.recv(1024).decode()) - 1  # Indices start from 0
+            response = s.recv(1024).decode()
+            count = int(response) - 1  # Indices start from 0
+            print(f"[Client] Received segment count {count + 1} for {current_video_name} ({current_quality}) from {ip}:{port}")
+            return count
     except Exception as e:
-        print(f"[Client] Failed to get segment count: {e}")
+        print(f"[Client] Failed to get segment count for {current_video_name} ({current_quality}) from {ip}:{port}: {e}")
         return -1
 
 def download_segment(segment_idx, quality):
@@ -128,7 +131,6 @@ def downloader_thread():
         with segment_lock:
             quality_to_download = pending_quality if pending_quality else current_quality
             if playback_state["seek_to"] is not None:
-                # Prioritize downloading the seeked segment
                 seek_timestamp = playback_state["seek_to"]
                 seek_segment = int(seek_timestamp // SEGMENT_DURATION)
                 existing = set(os.listdir(BUFFER_FOLDER))
@@ -136,7 +138,7 @@ def downloader_thread():
                     download_segment(seek_segment, quality_to_download)
                     downloaded_segments.add(f"{quality_to_download}_{seek_segment:03d}.ts")
                 next_segment_to_play = seek_segment
-                playback_state["seek_to"] = None  # Reset seek after handling
+                playback_state["seek_to"] = None
 
             segment_idx = next_segment_to_play
             needed_segments = list(range(segment_idx, min(segment_idx + BUFFER_WINDOW, MAX_SEGMENT_INDEX + 1)))
@@ -159,14 +161,11 @@ class VideoPlayer(QWidget):
         self.setWindowTitle("PyQt5 CDN Video Player")
         self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
 
-        # Video label
         self.video_label = QLabel()
         self.video_label.setAlignment(Qt.AlignCenter)
-        # self.video_label.setFixedSize(VIDEO_LABEL_WIDTH, VIDEO_LABEL_HEIGHT)
         self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.video_label.setStyleSheet("background-color: black;")  # Black background for video area
+        self.video_label.setStyleSheet("background-color: black;")
 
-        # Play button
         self.play_button = QPushButton("Pause")
         self.play_button.setFixedSize(100, 35)
         self.play_button.setStyleSheet("""
@@ -181,7 +180,6 @@ class VideoPlayer(QWidget):
             }
         """)
 
-        # Seek slider
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setTracking(True)
         self.slider.setStyleSheet("""
@@ -206,9 +204,8 @@ class VideoPlayer(QWidget):
         self.play_button.clicked.connect(self.toggle_play)
         self.slider.valueChanged.connect(self.slider_moved)
 
-        # Quality buttons
         quality_layout = QHBoxLayout()
-        quality_layout.setSpacing(10)  # 10px between buttons
+        quality_layout.setSpacing(10)
         self.button_240p = QPushButton("240p")
         self.button_240p.setFixedSize(80, 30)
         self.button_240p.setStyleSheet("""
@@ -241,7 +238,7 @@ class VideoPlayer(QWidget):
 
         self.button_720p = QPushButton("720p")
         self.button_720p.setFixedSize(80, 30)
-        self.button_720p.setStyleSheet("""
+        self.button_240p.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
@@ -254,33 +251,30 @@ class VideoPlayer(QWidget):
         self.button_720p.clicked.connect(lambda: self.set_quality("720p", user_initiated=True))
         quality_layout.addWidget(self.button_720p)
 
-        # Control bar (play button + quality buttons)
         control_bar = QHBoxLayout()
-        control_bar.setSpacing(20)  # 20px between play button and quality buttons
+        control_bar.setSpacing(20)
         control_bar.addWidget(self.play_button)
-        control_bar.addStretch()  # Add stretchable space
+        control_bar.addStretch()
         control_bar.addLayout(quality_layout)
-        control_bar.addStretch()  # Add stretchable space on the right for spacing
+        control_bar.addStretch()
 
-        # Main layout
         layout = QVBoxLayout()
-        layout.setSpacing(20)  # 20px between video and control bar
-        layout.setContentsMargins(20, 20, 20, 20)  # 20px margins on all sides
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
         layout.addWidget(self.video_label)
         layout.addLayout(control_bar)
-        layout.addWidget(self.slider)  # Slider below the control bar
+        layout.addWidget(self.slider)
         layout.setAlignment(Qt.AlignCenter)
         self.setLayout(layout)
 
-        # Timer for playback
         self.timer = QTimer()
         self.timer.timeout.connect(self.play_next_frame)
         self.timer.start(30)
 
         self.current_cap = None
         self.current_segment = -1
-        self.update_quality_styles()  # Initialize quality button styles
-        self.set_quality(current_quality)  # Initialize with default quality (no ABR disable)
+        self.update_quality_styles()
+        self.set_quality(current_quality)
 
     def set_quality(self, quality, user_initiated=False):
         global pending_quality, CDN_IP, CDN_PORT, MAX_SEGMENT_INDEX, TOTAL_DURATION, current_quality
@@ -290,7 +284,7 @@ class VideoPlayer(QWidget):
         ip, port = manifest_dict[current_video_name][quality]
         max_segments = get_segment_count(ip, port)
         if max_segments < 0:
-            QMessageBox.warning(self, "Error", f"CDN for {quality} is not available")
+            QMessageBox.warning(self, "Error", f"CDN for {quality} at {ip}:{port} has no segments or is unavailable")
             return
         pending_quality = quality
         CDN_IP, CDN_PORT = ip, port
@@ -298,14 +292,13 @@ class VideoPlayer(QWidget):
         TOTAL_DURATION = (MAX_SEGMENT_INDEX + 1) * SEGMENT_DURATION
         self.slider.setRange(0, TOTAL_DURATION)
         if user_initiated:
-            playback_state["abr_enabled"] = False  # Disable ABR only for user actions
+            playback_state["abr_enabled"] = False
             playback_state["last_explicit_quality_change"] = time.time()
-        current_quality = quality  # Update current quality
-        self.update_quality_styles()  # Update button styles after quality change
+        current_quality = quality
+        self.update_quality_styles()
         print(f"[Client] Queued quality change to {quality}, total duration: {TOTAL_DURATION}s")
 
     def update_quality_styles(self):
-        # Reset all quality buttons to default style
         default_style = """
             QPushButton {
                 background-color: #4CAF50;
@@ -338,7 +331,7 @@ class VideoPlayer(QWidget):
         global last_seek_time
         current_time = time.time()
         if current_time - last_seek_time < SEEK_DEBOUNCE_TIME:
-            return  # Ignore rapid seeks
+            return
         value = self.slider.value()
         playback_state["seek_to"] = value
         last_seek_time = current_time
@@ -350,7 +343,6 @@ class VideoPlayer(QWidget):
         if playback_state["exit"] or not playback_state["playing"]:
             return
 
-        # Re-enable ABR after ABR_RESET_DELAY if user explicitly changed quality
         current_time = time.time()
         if not playback_state["abr_enabled"] and current_time - playback_state["last_explicit_quality_change"] > ABR_RESET_DELAY:
             playback_state["abr_enabled"] = True
@@ -363,9 +355,9 @@ class VideoPlayer(QWidget):
                 self.current_cap.release()
                 self.current_cap = None
             self.current_segment = -1
-            pending_quality = None  # Reset pending quality on seek
+            pending_quality = None
             print(f"[Client] Seek to segment {next_segment_to_play} from timestamp {seek_timestamp}s")
-            playback_state["seek_to"] = None  # Reset seek
+            playback_state["seek_to"] = None
 
         if next_segment_to_play > MAX_SEGMENT_INDEX:
             playback_state["exit"] = True
@@ -377,19 +369,16 @@ class VideoPlayer(QWidget):
 
         if not os.path.exists(segment_path):
             current_time = time.time()
-            if current_time - last_not_found_log >= 1:  # Log every 1s to reduce spam
+            if current_time - last_not_found_log >= 1:
                 print(f"[Client] Segment {segment_path} not found, waiting for download")
                 last_not_found_log = current_time
-            # ABR: Downgrade based on waiting time
             if playback_state["abr_enabled"]:
                 waiting_time = current_time - last_playback_time
                 current_idx = QUALITY_LEVELS.index(current_quality)
                 if waiting_time > DOWNLOAD_TIMEOUT_2 and current_quality != "240p":
-                    # Second threshold: downgrade directly to 240p
                     pending_quality = "240p"
                     print(f"[ABR] Segment {segment_path} unavailable for {waiting_time:.2f}s (> {DOWNLOAD_TIMEOUT_2}s), downgrading directly to 240p")
                 elif waiting_time > DOWNLOAD_TIMEOUT_1 and current_idx < len(QUALITY_LEVELS) - 1:
-                    # First threshold: downgrade to next quality
                     new_quality = QUALITY_LEVELS[current_idx + 1]
                     pending_quality = new_quality
                     print(f"[ABR] Segment {segment_path} unavailable for {waiting_time:.2f}s (> {DOWNLOAD_TIMEOUT_1}s), downgrading to {new_quality}")
@@ -403,13 +392,13 @@ class VideoPlayer(QWidget):
             if not self.current_cap.isOpened():
                 print(f"[Client] Failed to open segment {segment_path}")
                 next_segment_to_play += 1
-                last_playback_time = time.time()  # Update to avoid immediate downgrade
+                last_playback_time = time.time()
                 return
 
         if not self.current_cap or not self.current_cap.isOpened():
             print(f"[Client] Invalid video capture for segment {segment_path}")
             next_segment_to_play += 1
-            last_playback_time = time.time()  # Update to avoid immediate downgrade
+            last_playback_time = time.time()
             return
 
         ret, frame = self.current_cap.read()
@@ -418,8 +407,7 @@ class VideoPlayer(QWidget):
             self.current_cap = None
             next_segment_to_play += 1
             self.slider.setValue(next_segment_to_play * SEGMENT_DURATION)
-            last_playback_time = time.time()  # Update to avoid immediate downgrade
-            # Switch to pending quality after segment finishes
+            last_playback_time = time.time()
             if pending_quality:
                 current_quality = pending_quality
                 pending_quality = None
@@ -427,16 +415,16 @@ class VideoPlayer(QWidget):
                 CDN_IP, CDN_PORT = ip, port
                 MAX_SEGMENT_INDEX = get_segment_count(ip, port)
                 if MAX_SEGMENT_INDEX < 0:
-                    QMessageBox.warning(self, "Error", f"CDN for {current_quality} is not available")
+                    QMessageBox.warning(self, "Error", f"CDN for {current_quality} at {ip}:{port} has no segments or is unavailable")
                     playback_state["exit"] = True
                     return
                 TOTAL_DURATION = (MAX_SEGMENT_INDEX + 1) * SEGMENT_DURATION
                 self.slider.setRange(0, TOTAL_DURATION)
-                self.update_quality_styles()  # Update styles after quality switch
+                self.update_quality_styles()
                 print(f"[Client] Switched to quality {current_quality}, total duration: {TOTAL_DURATION}s")
             return
 
-        last_playback_time = time.time()  # Update on successful frame
+        last_playback_time = time.time()
         self.slider.setValue(next_segment_to_play * SEGMENT_DURATION)
 
         rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -465,18 +453,21 @@ def main():
 
     if current_video_name not in manifest_dict:
         print(f"[Client] Video '{current_video_name}' not found in manifest.")
-        return
+        manifest_dict[current_video_name] = {
+            "720p": ("127.0.0.1",13751),
+            "736p": ("127.0.0.1",13751),
+            "240p": ("127.0.0.1",13751)}
+        # return
 
-    # Initialize with default quality (720p)
     if "720p" in manifest_dict[current_video_name]:
         CDN_IP, CDN_PORT = manifest_dict[current_video_name]["720p"]
         MAX_SEGMENT_INDEX = get_segment_count(CDN_IP, CDN_PORT)
         if MAX_SEGMENT_INDEX < 0:
-            print("[Client] CDN for default quality (720p) not available. Exiting.")
+            print(f"[Client] CDN for default quality (720p) at {CDN_IP}:{CDN_PORT} has no segments or is unavailable for {current_video_name}. Exiting.")
             return
         TOTAL_DURATION = (MAX_SEGMENT_INDEX + 1) * SEGMENT_DURATION
     else:
-        print("[Client] Default quality (720p) not available for this video. Exiting.")
+        print(f"[Client] Default quality (720p) not available for {current_video_name} in manifest. Exiting.")
         return
 
     dl_thread = threading.Thread(target=downloader_thread, daemon=True)
